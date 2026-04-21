@@ -1,195 +1,257 @@
 """
 SAGE ML Inference Service — 2-Stage Cascaded Pipeline
+=====================================================
 
-Stage 1: XGBoost Binary → Human vs Bot
-Stage 2: Random Forest 3-Class → Flood vs Scraper vs Recon (bot only)
+Flow:
+    Request → Stage 1 (Human vs Bot)
+              ├─ Human  → ALLOW  (return immediately, skip Stage 2)
+              └─ Bot    → Stage 2 (Flood / Scraper / Recon)
+                          ├─ Flood   → BAN
+                          ├─ Scraper → RATE_LIMIT
+                          └─ Recon   → CAPTCHA
+
+Threshold:
+    Configurable via:
+      1. models/human_vs_bot_threshold.json  (persisted, loaded on startup)
+      2. PUT /config/threshold               (runtime hot-reload, no restart)
+      3. Environment variable SAGE_BOT_THRESHOLD (overrides file on startup)
+
+    Higher threshold → more conservative (fewer humans blocked, more bots leak)
+    Lower  threshold → more aggressive  (catches more bots, risks blocking humans)
+
+    Recommended range: 0.30 – 0.60
+    Default: 0.50
 
 Endpoints:
-    POST /predict           — Receive telemetry from Java Gateway, return verdict
-    GET  /predict/{user_id} — Pull features from Redis, return verdict
-    GET  /health            — Service and model health
-    GET  /metrics           — Prometheus metrics
+    POST /predict             — full telemetry from Java Gateway
+    GET  /predict/{user_id}   — pull features from Redis
+    GET  /health              — service + model health
+    GET  /metrics             — Prometheus metrics
+    GET  /config/threshold    — read current threshold
+    PUT  /config/threshold    — update threshold at runtime
 """
 
 from fastapi import FastAPI, HTTPException, Response
+from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
+from prometheus_client import (
+    Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST,
+)
+
 import joblib
 import json
-import os
-import time
+import logging
 import numpy as np
+import os
 import pandas as pd
-from contextlib import asynccontextmanager
-from assembler import FeatureAssembler, STAGE1_FEATURES, STAGE2_FEATURES, ALL_FEATURES
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from pydantic import BaseModel, Field
+import time
 
+from assembler import (
+    FeatureAssembler,
+    STAGE1_FEATURES,
+    STAGE2_FEATURES,
+    ALL_FEATURES,
+)
+
+# ── Logging ──────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
+logger = logging.getLogger("sage.inference")
 
 # ── Prometheus Metrics ───────────────────────────────────────────────
-REQUESTS_TOTAL = Counter("sage_inference_requests_total", "Total prediction requests received")
-THREATS_DETECTED_TOTAL = Counter("sage_inference_threats_detected_total", "Total requests classified as bots")
-INFERENCE_LATENCY = Histogram("sage_inference_latency_seconds", "Time spent processing the ML prediction")
-STAGE1_HUMAN_TOTAL = Counter("sage_stage1_human_total", "Requests classified as human by Stage 1")
-STAGE1_BOT_TOTAL = Counter("sage_stage1_bot_total", "Requests classified as bot by Stage 1")
 
-# ── Global Model State ──────────────────────────────────────────────
-STAGE1_MODEL = None        # XGBoost: Human vs Bot
-STAGE2_MODEL = None        # RandomForest: Flood vs Scraper vs Recon
-STAGE2_ENCODER = None      # LabelEncoder for Stage 2 classes
-STAGE1_THRESHOLD = 0.50    # Bot probability threshold (tuned for human safety)
+REQ_TOTAL       = Counter("sage_requests_total", "Total prediction requests")
+BOT_TOTAL       = Counter("sage_bots_detected_total", "Total bots detected")
+HUMAN_TOTAL     = Counter("sage_humans_allowed_total", "Total humans allowed")
+LATENCY         = Histogram("sage_latency_seconds", "End-to-end prediction latency")
+THRESHOLD_GAUGE = Gauge("sage_threshold", "Current bot-detection threshold")
+
+STAGE2_CLASS_COUNTER = Counter(
+    "sage_stage2_class_total",
+    "Stage 2 class predictions",
+    ["threat_class"],
+)
+
+# ── Global State ─────────────────────────────────────────────────────
+
+STAGE1_MODEL   = None
+STAGE2_MODEL   = None
+STAGE2_ENCODER = None
+BOT_THRESHOLD  = 0.50
 
 assembler = FeatureAssembler(host="localhost", port=6379)
 
-# Actions for graduated response
-RESPONSE_ACTIONS = {
-    "flood": "BAN",
+# Graduated response mapping
+RESPONSE_MAP = {
+    "flood":   "BAN",
     "scraper": "RATE_LIMIT",
-    "recon": "CAPTCHA",
+    "recon":   "CAPTCHA",
 }
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
 
 class GatewayTelemetry(BaseModel):
-    """Full 22-feature payload from the Java Gateway."""
+    """22-feature payload from the Java Gateway."""
     session_id: str
-    # Stage 1 — Behavioural features
-    SAGE_InterArrival_CV: float = Field(default=1.0, description="CV of inter-request time gaps")
-    SAGE_Timing_Entropy: float = Field(default=1.5, description="Shannon entropy of timing bins")
-    SAGE_Pause_Ratio: float = Field(default=0.3, description="Fraction of gaps > 2s")
-    SAGE_Burst_Score: float = Field(default=0.01, description="Burst clusters / session depth")
-    SAGE_Backtrack_Ratio: float = Field(default=0.2, description="Revisits to seen endpoints")
-    SAGE_Path_Entropy: float = Field(default=2.0, description="Shannon entropy of endpoint distribution")
-    SAGE_Referral_Chain_Depth: float = Field(default=2.0, description="Mean hierarchical nav chain length")
-    SAGE_Session_Depth: float = Field(default=1.0, description="Total requests in session")
-    SAGE_Method_Diversity: float = Field(default=0.15, description="Unique HTTP methods / total")
-    SAGE_Static_Asset_Ratio: float = Field(default=0.3, description="Static resource loads / total")
-    SAGE_Error_Rate: float = Field(default=0.02, description="4xx+5xx responses / total")
-    SAGE_Payload_Variance: float = Field(default=100.0, description="StdDev of request body sizes")
-    # Stage 2 — Operational features
-    SAGE_Request_Velocity: float = Field(default=1.0, description="Requests per minute")
-    SAGE_Peak_Burst_RPS: float = Field(default=1.0, description="Max requests in any 1s window")
-    SAGE_Velocity_Trend: float = Field(default=0.0, description="Slope of velocity over time")
-    SAGE_Endpoint_Concentration: float = Field(default=0.3, description="Top-3 endpoints / total")
-    SAGE_Cart_Ratio: float = Field(default=0.1, description="Cart+checkout / total")
-    SAGE_Sequential_Traversal: float = Field(default=0.05, description="Consecutive ID traversal score")
-    SAGE_Sensitive_Endpoint_Ratio: float = Field(default=0.01, description="Admin/config path fraction")
-    SAGE_UA_Entropy: float = Field(default=0.0, description="User-Agent string entropy")
-    SAGE_Header_Completeness: float = Field(default=0.9, description="Browser header presence score")
-    SAGE_Response_Size_Variance: float = Field(default=200.0, description="StdDev of response sizes")
+    # — Stage 1: Behavioural features (12) —
+    SAGE_InterArrival_CV:       float = Field(default=1.0)
+    SAGE_Timing_Entropy:        float = Field(default=1.5)
+    SAGE_Pause_Ratio:           float = Field(default=0.3)
+    SAGE_Burst_Score:           float = Field(default=0.01)
+    SAGE_Backtrack_Ratio:       float = Field(default=0.2)
+    SAGE_Path_Entropy:          float = Field(default=2.0)
+    SAGE_Referral_Chain_Depth:  float = Field(default=2.0)
+    SAGE_Session_Depth:         float = Field(default=1.0)
+    SAGE_Method_Diversity:      float = Field(default=0.15)
+    SAGE_Static_Asset_Ratio:    float = Field(default=0.3)
+    SAGE_Error_Rate:            float = Field(default=0.02)
+    SAGE_Payload_Variance:      float = Field(default=100.0)
+    # — Stage 2: Operational features (10) —
+    SAGE_Request_Velocity:       float = Field(default=1.0)
+    SAGE_Peak_Burst_RPS:         float = Field(default=1.0)
+    SAGE_Velocity_Trend:         float = Field(default=0.0)
+    SAGE_Endpoint_Concentration: float = Field(default=0.3)
+    SAGE_Cart_Ratio:             float = Field(default=0.1)
+    SAGE_Sequential_Traversal:   float = Field(default=0.05)
+    SAGE_Sensitive_Endpoint_Ratio: float = Field(default=0.01)
+    SAGE_UA_Entropy:             float = Field(default=0.0)
+    SAGE_Header_Completeness:    float = Field(default=0.9)
+    SAGE_Response_Size_Variance: float = Field(default=200.0)
 
 
 class InferenceResult(BaseModel):
     """Response returned to the Java Gateway."""
-    session_id: str
-    is_bot: bool
-    bot_probability: float
-    threat_class: str        # "Human", "Flood", "Scraper", "Recon"
-    confidence: float
-    action: str              # "ALLOW", "BAN", "RATE_LIMIT", "CAPTCHA", "MONITOR"
+    session_id:        str
+    is_bot:            bool
+    bot_probability:   float
+    threat_class:      str       # "Human" | "Flood" | "Scraper" | "Recon"
+    confidence:        float
+    action:            str       # "ALLOW" | "BAN" | "RATE_LIMIT" | "CAPTCHA" | "MONITOR"
     processing_time_ms: float
+    stage1_threshold:  float     # current threshold (for observability)
 
 
-# ── Lifespan & Model Loading ────────────────────────────────────────
+class ThresholdUpdate(BaseModel):
+    """Body for PUT /config/threshold."""
+    threshold: float = Field(ge=0.01, le=0.99, description="Bot probability threshold")
+
+
+# ── Model Loading ────────────────────────────────────────────────────
+
+def _load_models(model_dir: str) -> None:
+    """Load both models and threshold from disk."""
+    global STAGE1_MODEL, STAGE2_MODEL, STAGE2_ENCODER, BOT_THRESHOLD
+
+    # Stage 1
+    s1_path = os.path.join(model_dir, "human_vs_bot.pkl")
+    if os.path.exists(s1_path):
+        STAGE1_MODEL = joblib.load(s1_path)
+        logger.info(f"Stage 1 loaded: {s1_path}")
+    else:
+        logger.warning(f"Stage 1 model NOT FOUND: {s1_path}")
+
+    # Stage 2
+    s2_path = os.path.join(model_dir, "attack_classifier.pkl")
+    enc_path = os.path.join(model_dir, "attack_classifier_encoder.pkl")
+    if os.path.exists(s2_path):
+        STAGE2_MODEL = joblib.load(s2_path)
+        logger.info(f"Stage 2 loaded: {s2_path}")
+    else:
+        logger.warning(f"Stage 2 model NOT FOUND: {s2_path}")
+
+    if os.path.exists(enc_path):
+        STAGE2_ENCODER = joblib.load(enc_path)
+        logger.info(f"Stage 2 classes: {STAGE2_ENCODER.classes_.tolist()}")
+
+    # Threshold: env var → file → default
+    env_threshold = os.environ.get("SAGE_BOT_THRESHOLD")
+    if env_threshold:
+        BOT_THRESHOLD = float(env_threshold)
+        logger.info(f"Threshold from env: {BOT_THRESHOLD}")
+    else:
+        thr_path = os.path.join(model_dir, "human_vs_bot_threshold.json")
+        if os.path.exists(thr_path):
+            with open(thr_path) as f:
+                BOT_THRESHOLD = json.load(f).get("optimal_threshold", 0.50)
+            logger.info(f"Threshold from file: {BOT_THRESHOLD}")
+        else:
+            logger.info(f"Threshold default: {BOT_THRESHOLD}")
+
+    THRESHOLD_GAUGE.set(BOT_THRESHOLD)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global STAGE1_MODEL, STAGE2_MODEL, STAGE2_ENCODER, STAGE1_THRESHOLD
-
-    base_path = os.path.dirname(__file__)
-    model_dir = os.path.abspath(os.path.join(base_path, "..", "models"))
-
-    # Stage 1: Human vs Bot (XGBoost)
-    stage1_path = os.path.join(model_dir, "human_vs_bot.pkl")
-    threshold_path = os.path.join(model_dir, "human_vs_bot_threshold.json")
-
-    if os.path.exists(stage1_path):
-        STAGE1_MODEL = joblib.load(stage1_path)
-        print(f"[+] Stage 1 model loaded: {stage1_path}")
-    else:
-        print(f"[!] WARNING: Stage 1 model not found at {stage1_path}")
-
-    if os.path.exists(threshold_path):
-        with open(threshold_path) as f:
-            STAGE1_THRESHOLD = json.load(f).get("optimal_threshold", 0.50)
-        print(f"[+] Stage 1 threshold: {STAGE1_THRESHOLD}")
-
-    # Stage 2: Flood vs Scraper vs Recon (Random Forest)
-    stage2_path = os.path.join(model_dir, "attack_classifier.pkl")
-    encoder_path = os.path.join(model_dir, "attack_classifier_encoder.pkl")
-
-    if os.path.exists(stage2_path):
-        STAGE2_MODEL = joblib.load(stage2_path)
-        print(f"[+] Stage 2 model loaded: {stage2_path}")
-    else:
-        print(f"[!] WARNING: Stage 2 model not found at {stage2_path}")
-
-    if os.path.exists(encoder_path):
-        STAGE2_ENCODER = joblib.load(encoder_path)
-        print(f"[+] Stage 2 classes: {STAGE2_ENCODER.classes_.tolist()}")
-    else:
-        print(f"[!] WARNING: Stage 2 label encoder not found at {encoder_path}")
+    base = os.path.dirname(__file__)
+    model_dir = os.path.abspath(os.path.join(base, "..", "models"))
+    _load_models(model_dir)
 
     ready = STAGE1_MODEL is not None and STAGE2_MODEL is not None
-    print(f"\n[{'✓' if ready else '✗'}] SAGE 2-Stage Engine {'READY' if ready else 'DEGRADED'}")
+    logger.info(f"SAGE 2-Stage Engine: {'READY' if ready else 'DEGRADED'}")
     yield
 
 
 app = FastAPI(
     lifespan=lifespan,
     title="SAGE ML Inference — 2-Stage Pipeline",
-    description="Stage 1: Human vs Bot → Stage 2: Flood / Scraper / Recon",
+    version="2.0.0",
 )
 
 
-# ── Core Inference Logic ─────────────────────────────────────────────
+# ── Core Inference ───────────────────────────────────────────────────
 
-def run_two_stage_inference(feature_dict: dict) -> dict:
+def _predict(feature_dict: dict) -> dict:
     """
-    Execute the cascaded 2-stage pipeline.
+    Execute the 2-stage cascade.
 
-    Returns:
-        dict with is_bot, bot_probability, threat_class, confidence, action
+    STAGE 1  →  bot_probability < threshold?
+                    YES → return Human (ALLOW)
+                    NO  → continue to Stage 2
+
+    STAGE 2  →  classify bot type → graduated response
     """
-    # ──── STAGE 1: Human vs Bot ────
-    X_stage1 = assembler.assemble_stage1(feature_dict)
-    stage1_proba = STAGE1_MODEL.predict_proba(X_stage1)[0]
-    bot_probability = float(stage1_proba[1])  # probability of class 1 (bot)
+    # ── Stage 1: Human vs Bot ────────────────────────────────────────
+    X1 = assembler.assemble_stage1(feature_dict)
+    proba = STAGE1_MODEL.predict_proba(X1)[0]
+    bot_prob = float(proba[1])
 
-    if bot_probability < STAGE1_THRESHOLD:
-        # Classified as HUMAN → allow traffic
-        STAGE1_HUMAN_TOTAL.inc()
+    if bot_prob < BOT_THRESHOLD:
+        HUMAN_TOTAL.inc()
         return {
             "is_bot": False,
-            "bot_probability": bot_probability,
+            "bot_probability": bot_prob,
             "threat_class": "Human",
-            "confidence": float(1.0 - bot_probability),
+            "confidence": round(1.0 - bot_prob, 4),
             "action": "ALLOW",
         }
 
-    # ──── STAGE 2: Bot Sub-Classification ────
-    STAGE1_BOT_TOTAL.inc()
-    THREATS_DETECTED_TOTAL.inc()
+    # ── Stage 2: Attack Classification ───────────────────────────────
+    BOT_TOTAL.inc()
+    X2 = assembler.assemble_stage2(feature_dict)
+    s2_proba = STAGE2_MODEL.predict_proba(X2)[0]
+    pred_idx = int(np.argmax(s2_proba))
+    s2_conf = float(s2_proba[pred_idx])
+    threat = str(STAGE2_ENCODER.inverse_transform([pred_idx])[0])
 
-    X_stage2 = assembler.assemble_stage2(feature_dict)
-    stage2_proba = STAGE2_MODEL.predict_proba(X_stage2)[0]
-    predicted_idx = int(np.argmax(stage2_proba))
-    stage2_confidence = float(stage2_proba[predicted_idx])
+    STAGE2_CLASS_COUNTER.labels(threat_class=threat).inc()
 
-    threat_class = str(STAGE2_ENCODER.inverse_transform([predicted_idx])[0])
-
-    # Determine graduated response action
-    if bot_probability >= 0.80:
-        action = RESPONSE_ACTIONS.get(threat_class, "BAN")
-    elif bot_probability >= 0.60:
+    # Graduated response
+    if bot_prob >= 0.80:
+        action = RESPONSE_MAP.get(threat, "BAN")
+    elif bot_prob >= 0.60:
         action = "MONITOR"
     else:
         action = "ALLOW"
 
     return {
         "is_bot": True,
-        "bot_probability": bot_probability,
-        "threat_class": threat_class.capitalize(),
-        "confidence": stage2_confidence,
+        "bot_probability": bot_prob,
+        "threat_class": threat.capitalize(),
+        "confidence": round(s2_conf, 4),
         "action": action,
     }
 
@@ -197,93 +259,137 @@ def run_two_stage_inference(feature_dict: dict) -> dict:
 # ── Endpoints ────────────────────────────────────────────────────────
 
 @app.post("/predict", response_model=InferenceResult)
-def predict_anomaly(data: GatewayTelemetry):
-    """
-    Receives real-time telemetry from the Java Gateway.
-    Runs the 2-stage pipeline and returns a verdict.
-    """
+def predict_from_payload(data: GatewayTelemetry):
+    """Receive full telemetry from the Java Gateway and return a verdict."""
     if STAGE1_MODEL is None or STAGE2_MODEL is None:
-        raise HTTPException(status_code=503, detail="Models not loaded")
+        raise HTTPException(503, "Models not loaded")
 
-    start_time = time.perf_counter()
-    REQUESTS_TOTAL.inc()
+    t0 = time.perf_counter()
+    REQ_TOTAL.inc()
 
     try:
-        # Convert Pydantic model to feature dict
-        feature_dict = assembler.assemble_from_payload(data.model_dump())
-
-        result = run_two_stage_inference(feature_dict)
-
-        processing_ms = round((time.perf_counter() - start_time) * 1000, 3)
-        INFERENCE_LATENCY.observe(time.perf_counter() - start_time)
+        features = assembler.assemble_from_payload(data.model_dump())
+        result = _predict(features)
+        elapsed_ms = round((time.perf_counter() - t0) * 1000, 3)
+        LATENCY.observe(time.perf_counter() - t0)
 
         return InferenceResult(
             session_id=data.session_id,
-            is_bot=result["is_bot"],
-            bot_probability=round(result["bot_probability"], 4),
-            threat_class=result["threat_class"],
-            confidence=round(result["confidence"], 4),
-            action=result["action"],
-            processing_time_ms=processing_ms,
+            processing_time_ms=elapsed_ms,
+            stage1_threshold=BOT_THRESHOLD,
+            **result,
         )
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Prediction error")
+        raise HTTPException(500, str(e))
 
 
 @app.get("/predict/{user_id}")
-async def predict_bot(user_id: str):
-    """
-    Pull features from Redis for a user and run the 2-stage pipeline.
-    """
+async def predict_from_redis(user_id: str):
+    """Pull features from Redis and return a verdict."""
     if STAGE1_MODEL is None or STAGE2_MODEL is None:
-        raise HTTPException(status_code=503, detail="Models not loaded")
+        raise HTTPException(503, "Models not loaded")
 
-    start_time = time.perf_counter()
-    REQUESTS_TOTAL.inc()
+    t0 = time.perf_counter()
+    REQ_TOTAL.inc()
 
     try:
-        feature_dict = assembler.assemble_full(user_id)
-        result = run_two_stage_inference(feature_dict)
-
-        processing_ms = round((time.perf_counter() - start_time) * 1000, 3)
-        INFERENCE_LATENCY.observe(time.perf_counter() - start_time)
+        features = assembler.assemble_full(user_id)
+        result = _predict(features)
+        elapsed_ms = round((time.perf_counter() - t0) * 1000, 3)
+        LATENCY.observe(time.perf_counter() - t0)
 
         return {
             "user_id": user_id,
-            "is_bot": result["is_bot"],
-            "bot_probability": round(result["bot_probability"], 4),
-            "threat_class": result["threat_class"],
-            "confidence": round(result["confidence"], 4),
-            "action": result["action"],
-            "processing_time_ms": processing_ms,
+            "processing_time_ms": elapsed_ms,
+            "stage1_threshold": BOT_THRESHOLD,
+            **result,
         }
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Prediction error")
+        raise HTTPException(500, str(e))
 
+
+# ── Threshold Configuration ──────────────────────────────────────────
+
+@app.get("/config/threshold")
+def get_threshold():
+    """
+    Read the current bot-detection threshold.
+
+    Adjusting the threshold:
+      - INCREASE (e.g. 0.70) → more lenient, fewer humans blocked,
+        but some bots may slip through.
+      - DECREASE (e.g. 0.30) → more aggressive, catches more bots,
+        but risks blocking borderline humans.
+
+    Recommendation: start at 0.50 and lower **only** if human recall
+    is already ≥ 95% on your evaluation set.
+    """
+    return {
+        "threshold": BOT_THRESHOLD,
+        "description": "bot_probability >= threshold → classified as bot",
+        "how_to_adjust": {
+            "runtime": "PUT /config/threshold  {\"threshold\": 0.40}",
+            "startup_env": "export SAGE_BOT_THRESHOLD=0.40",
+            "startup_file": "models/human_vs_bot_threshold.json",
+        },
+    }
+
+
+@app.put("/config/threshold")
+def set_threshold(body: ThresholdUpdate):
+    """Update the bot-detection threshold without restarting the service."""
+    global BOT_THRESHOLD
+    old = BOT_THRESHOLD
+    BOT_THRESHOLD = body.threshold
+    THRESHOLD_GAUGE.set(BOT_THRESHOLD)
+
+    # Persist to disk so it survives restarts
+    base = os.path.dirname(__file__)
+    thr_path = os.path.abspath(
+        os.path.join(base, "..", "models", "human_vs_bot_threshold.json")
+    )
+    try:
+        with open(thr_path, "w") as f:
+            json.dump({"optimal_threshold": BOT_THRESHOLD}, f, indent=2)
+    except OSError:
+        logger.warning("Could not persist threshold to disk")
+
+    logger.info(f"Threshold changed: {old} → {BOT_THRESHOLD}")
+    return {
+        "previous": old,
+        "current": BOT_THRESHOLD,
+        "persisted": True,
+    }
+
+
+# ── Observability ────────────────────────────────────────────────────
 
 @app.get("/metrics")
-async def get_metrics():
+async def prometheus_metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
-def health_check():
-    stage1_ok = STAGE1_MODEL is not None
-    stage2_ok = STAGE2_MODEL is not None and STAGE2_ENCODER is not None
-
+def health():
+    s1 = STAGE1_MODEL is not None
+    s2 = STAGE2_MODEL is not None and STAGE2_ENCODER is not None
     return {
-        "status": "operational" if (stage1_ok and stage2_ok) else "degraded",
-        "stage1_loaded": stage1_ok,
-        "stage2_loaded": stage2_ok,
-        "stage1_threshold": STAGE1_THRESHOLD,
+        "status": "operational" if (s1 and s2) else "degraded",
+        "stage1_loaded": s1,
+        "stage2_loaded": s2,
+        "threshold": BOT_THRESHOLD,
         "stage2_classes": STAGE2_ENCODER.classes_.tolist() if STAGE2_ENCODER else [],
-        "stage1_features": STAGE1_FEATURES,
-        "stage2_features": STAGE2_FEATURES,
-        "pipeline": "2-stage cascaded (Human→Bot→Flood/Scraper/Recon)",
+        "feature_counts": {
+            "stage1": len(STAGE1_FEATURES),
+            "stage2": len(STAGE2_FEATURES),
+            "total": len(ALL_FEATURES),
+        },
     }
 
+
+# ── Entrypoint ───────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn

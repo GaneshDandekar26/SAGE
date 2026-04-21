@@ -1,0 +1,48 @@
+======================================================================
+  SAGE Pipeline Validation Report
+  Generated: 2026-04-22 01:04:37
+======================================================================
+
+  [✓] PASS  Model artifact: Stage 1 model
+         Loaded OK (11.5 KB)
+  [✓] PASS  Model artifact: Stage 1 threshold
+         Valid JSON (0.0 KB)
+  [✓] PASS  Model artifact: Stage 2 model
+         Loaded OK (19.8 KB)
+  [✓] PASS  Model artifact: Stage 2 label encoder
+         Loaded OK (0.3 KB)
+  [✓] PASS  Stage 1 feature consistency
+         All 12 features match
+  [✓] PASS  Stage 2 feature consistency
+         All 10 features match
+  [✓] PASS  Stage 1 model feature count
+         Model expects 12 features, we provide 12
+  [✓] PASS  Stage 2 model feature count
+         Model expects 10 features, we provide 10
+  [✓] PASS  Training seed
+         random_state=42 (hardcoded in training scripts)
+  [✓] PASS  Evaluation seed
+         random_state=99 (hardcoded in evaluation script)
+  [✓] PASS  Stage 1 label encoding
+         Binary: 0=Human, 1=Bot
+  [✓] PASS  Stage 1 data quality
+         No NaN or Inf values in features
+  [✓] PASS  Stage 2 data isolation
+         No human rows in Stage 2 data (bot-only)
+  [✓] PASS  Stage 2 class coverage
+         All classes present: ['flood', 'recon', 'scraper']
+  [✓] PASS  Label encoder classes
+         Matches expected: ['flood', 'recon', 'scraper']
+  [✓] PASS  Threshold range
+         0.05 is within valid range [0.01, 0.99]
+  [⚠] WARN  Threshold tuning
+         Very low (0.05) — almost all traffic classified as bot. May cause false positives.
+  [✓] PASS  Assembler feature coverage
+         All 22 features present in assembler.py
+  [✓] PASS  Stage 1 smoke test
+         predict_proba returned shape (1, 2)
+  [✓] PASS  Stage 2 smoke test
+         Predicted: 'flood'
+
+PASS: 19  |  WARN: 1  |  FAIL: 0
+======================================================================
