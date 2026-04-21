@@ -211,19 +211,19 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate SAGE 2-stage pipeline end-to-end")
     parser.add_argument(
         "--stage1-model",
-        default=os.path.join(BASE_DIR, "models", "sage_stage1_human_vs_bot.pkl"),
+        default=os.path.join(BASE_DIR, "models", "human_vs_bot.pkl"),
     )
     parser.add_argument(
         "--stage1-threshold",
-        default=os.path.join(BASE_DIR, "models", "sage_stage1_threshold.json"),
+        default=os.path.join(BASE_DIR, "models", "human_vs_bot_threshold.json"),
     )
     parser.add_argument(
         "--stage2-model",
-        default=os.path.join(BASE_DIR, "models", "sage_stage2_bot_classifier.pkl"),
+        default=os.path.join(BASE_DIR, "models", "attack_classifier.pkl"),
     )
     parser.add_argument(
         "--stage2-encoder",
-        default=os.path.join(BASE_DIR, "models", "sage_stage2_label_encoder.pkl"),
+        default=os.path.join(BASE_DIR, "models", "attack_classifier_encoder.pkl"),
     )
     parser.add_argument(
         "--eval-samples", type=int, default=5000,

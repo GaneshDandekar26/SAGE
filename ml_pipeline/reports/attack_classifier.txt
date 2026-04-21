@@ -1,0 +1,75 @@
+======================================================================
+  SAGE Stage 2 — Attack Classifier Evaluation Report
+  Generated: 2026-04-22 00:56:27
+======================================================================
+
+MODEL
+  Algorithm:    RandomForestClassifier
+  Features:     10
+  Classes:      flood, recon, scraper
+
+DATASET (Bot-only — no human rows)
+  Total rows:   60,000
+  Train rows:   48,000
+  Test rows:    12,000
+  flood          20,000
+  recon          20,000
+  scraper        20,000
+
+CROSS-VALIDATION (5-fold stratified)
+  accuracy            1.0000  (±0.0000)
+  f1_macro            1.0000  (±0.0000)
+  recall_macro        1.0000  (±0.0000)
+  precision_macro     1.0000  (±0.0000)
+
+HOLDOUT METRICS
+  Accuracy:      1.0000
+
+CONFUSION MATRIX
+               flood       recon     scraper
+  flood          4000           0           0
+  recon             0        4000           0
+  scraper           0           0        4000
+
+CLASSIFICATION REPORT
+              precision    recall  f1-score   support
+
+       flood       1.00      1.00      1.00      4000
+       recon       1.00      1.00      1.00      4000
+     scraper       1.00      1.00      1.00      4000
+
+    accuracy                           1.00     12000
+   macro avg       1.00      1.00      1.00     12000
+weighted avg       1.00      1.00      1.00     12000
+
+
+FEATURE IMPORTANCE
+  SAGE_UA_Entropy                      0.1650  ████████
+  SAGE_Sensitive_Endpoint_Ratio        0.1617  ████████
+  SAGE_Sequential_Traversal            0.1235  ██████
+  SAGE_Header_Completeness             0.1134  █████
+  SAGE_Response_Size_Variance          0.1120  █████
+  SAGE_Endpoint_Concentration          0.1106  █████
+  SAGE_Peak_Burst_RPS                  0.0902  ████
+  SAGE_Cart_Ratio                      0.0610  ███
+  SAGE_Request_Velocity                0.0431  ██
+  SAGE_Velocity_Trend                  0.0196  
+
+FEATURES USED
+   1. SAGE_Request_Velocity
+   2. SAGE_Peak_Burst_RPS
+   3. SAGE_Velocity_Trend
+   4. SAGE_Endpoint_Concentration
+   5. SAGE_Cart_Ratio
+   6. SAGE_Sequential_Traversal
+   7. SAGE_Sensitive_Endpoint_Ratio
+   8. SAGE_UA_Entropy
+   9. SAGE_Header_Completeness
+  10. SAGE_Response_Size_Variance
+
+GRADUATED RESPONSE MAP
+  Flood   → IP BAN      (5 min)
+  Scraper → RATE LIMIT  (10 min)
+  Recon   → CAPTCHA     (30 min)
+
+======================================================================

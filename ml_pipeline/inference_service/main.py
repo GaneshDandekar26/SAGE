@@ -99,8 +99,8 @@ async def lifespan(app: FastAPI):
     model_dir = os.path.abspath(os.path.join(base_path, "..", "models"))
 
     # Stage 1: Human vs Bot (XGBoost)
-    stage1_path = os.path.join(model_dir, "sage_stage1_human_vs_bot.pkl")
-    threshold_path = os.path.join(model_dir, "sage_stage1_threshold.json")
+    stage1_path = os.path.join(model_dir, "human_vs_bot.pkl")
+    threshold_path = os.path.join(model_dir, "human_vs_bot_threshold.json")
 
     if os.path.exists(stage1_path):
         STAGE1_MODEL = joblib.load(stage1_path)
@@ -114,8 +114,8 @@ async def lifespan(app: FastAPI):
         print(f"[+] Stage 1 threshold: {STAGE1_THRESHOLD}")
 
     # Stage 2: Flood vs Scraper vs Recon (Random Forest)
-    stage2_path = os.path.join(model_dir, "sage_stage2_bot_classifier.pkl")
-    encoder_path = os.path.join(model_dir, "sage_stage2_label_encoder.pkl")
+    stage2_path = os.path.join(model_dir, "attack_classifier.pkl")
+    encoder_path = os.path.join(model_dir, "attack_classifier_encoder.pkl")
 
     if os.path.exists(stage2_path):
         STAGE2_MODEL = joblib.load(stage2_path)

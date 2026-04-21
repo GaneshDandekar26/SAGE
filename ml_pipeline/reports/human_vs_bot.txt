@@ -1,0 +1,74 @@
+======================================================================
+  SAGE Stage 1 — Human vs Bot Evaluation Report
+  Generated: 2026-04-22 00:56:16
+======================================================================
+
+MODEL
+  Algorithm:          XGBClassifier
+  Features:           12
+  Optimal Threshold:  0.05
+
+DATASET
+  Total rows:         100,000
+  Train rows:         80,000
+  Test rows:          20,000
+  Human (label=0):    50,000
+  Bot   (label=1):    50,000
+
+CROSS-VALIDATION (5-fold stratified)
+  accuracy      1.0000  (±0.0000)
+  f1            1.0000  (±0.0000)
+  recall        1.0000  (±0.0000)
+  precision     1.0000  (±0.0000)
+  roc_auc       1.0000  (±0.0000)
+
+HOLDOUT METRICS
+  Accuracy:   1.0000
+  ROC-AUC:    1.0000
+
+CONFUSION MATRIX
+  True Negatives  (humans correctly allowed):   10,000
+  False Positives (humans incorrectly blocked): 0
+  False Negatives (bots missed):                0
+  True Positives  (bots correctly blocked):     10,000
+
+CLASSIFICATION REPORT
+              precision    recall  f1-score   support
+
+       Human       1.00      1.00      1.00     10000
+         Bot       1.00      1.00      1.00     10000
+
+    accuracy                           1.00     20000
+   macro avg       1.00      1.00      1.00     20000
+weighted avg       1.00      1.00      1.00     20000
+
+
+FEATURE IMPORTANCE
+  SAGE_Burst_Score                0.3878  ███████████████████
+  SAGE_InterArrival_CV            0.2171  ██████████
+  SAGE_Referral_Chain_Depth       0.1904  █████████
+  SAGE_Payload_Variance           0.1091  █████
+  SAGE_Timing_Entropy             0.0616  ███
+  SAGE_Path_Entropy               0.0319  █
+  SAGE_Pause_Ratio                0.0018  
+  SAGE_Method_Diversity           0.0001  
+  SAGE_Static_Asset_Ratio         0.0001  
+  SAGE_Error_Rate                 0.0000  
+  SAGE_Backtrack_Ratio            0.0000  
+  SAGE_Session_Depth              0.0000  
+
+FEATURES USED
+   1. SAGE_InterArrival_CV
+   2. SAGE_Timing_Entropy
+   3. SAGE_Pause_Ratio
+   4. SAGE_Burst_Score
+   5. SAGE_Backtrack_Ratio
+   6. SAGE_Path_Entropy
+   7. SAGE_Referral_Chain_Depth
+   8. SAGE_Session_Depth
+   9. SAGE_Method_Diversity
+  10. SAGE_Static_Asset_Ratio
+  11. SAGE_Error_Rate
+  12. SAGE_Payload_Variance
+
+======================================================================
