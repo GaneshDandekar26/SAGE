@@ -1,0 +1,23 @@
+{
+  "name": "sage-dashboard",
+  "version": "1.0.0",
+  "description": "Kafka-to-WebSocket bridge for the SAGE dashboard UI",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "dev": "node bridge.js"
+  },
+  "keywords": [
+    "kafka",
+    "socket.io",
+    "telemetry"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "kafkajs": "^2.2.4",
+    "kafkajs-snappy": "^1.1.0",
+    "socket.io": "^4.8.3"
+  }
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mock Shop</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Mock Shop logo" class="logo" />
+        <h1>Mock Shop</h1>
+      </div>
+      <nav>
+        <a href="/">Home</a>
+        <a href="/cart">Cart</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h2>Featured Products</h2>
+        <p>A lightweight storefront shell used for bot and scraper simulation.</p>
+      </section>
+
+      <section id="product-grid" class="grid" aria-live="polite"></section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

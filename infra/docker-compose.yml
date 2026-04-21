@@ -1,0 +1,183 @@
+
+
+services:
+  # Redis 7.x - Rate Limiting & State Management
+  redis:
+    image: redis:7.2-alpine
+    container_name: sage-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - sage-network
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+  # Zookeeper - Required for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: sage-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - sage-network
+
+  # Kafka - Event Streaming
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: sage-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_COMPRESSION_TYPE: snappy
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - sage-network
+
+  # Kafka UI - Optional but helpful for debugging
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: sage-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: sage-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - sage-network
+
+  ecommerce-shell:
+    build:
+      context: ../mock-target-site
+    container_name: sage-ecommerce
+    ports:
+      - "3001:3001"        # unprotected — direct access for demo
+    networks:
+      - sage-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/products"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  sage-gateway:
+    build:
+      context: ../sage-gateway
+    container_name: sage-gateway
+    ports:
+      - "8080:8080"        # protected path
+    environment:
+      - UPSTREAM_URL=http://sage-ecommerce:3001
+      - REDIS_HOST=sage-redis
+      - KAFKA_BROKER=kafka:29092
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      ecommerce-shell:
+        condition: service_healthy
+    networks:
+      - sage-network
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sage-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - sage-network
+
+  # Grafana - Metrics Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sage-grafana
+    ports:
+      - "5050:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - sage-network
+
+  # RedisInsight - Redis GUI (Optional)
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: sage-redis-insight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis-insight-data:/data
+    networks:
+      - sage-network
+
+networks:
+  sage-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  prometheus-data:
+  grafana-data:
+  redis-insight-data:
+

@@ -1,0 +1,72 @@
+server:
+  port: 8081
+  tomcat:
+    accept-count: 1000
+    max-connections: 20000
+    threads:
+      max: 200
+      min-spare: 10
+
+spring:
+  application:
+    name: sage-gateway
+  threads:
+    virtual:
+      enabled: true
+
+  data:
+    redis:
+      host: localhost # Or Redis Cloud URL
+      port: 6379
+      timeout: 100ms
+      connect-timeout: 200ms
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+
+      properties:
+        acks: 1
+        linger.ms: 10
+        batch.size: 16384
+        buffer.memory: 67108864    # 64MB buffer
+        max.block.ms: 1000
+        compression.type: snappy
+
+sage:
+  rate-limit:
+    enabled: true
+    default-policy:
+      replenish-rate: 100
+      burst-capacity: 200
+    routes:
+      secure-data-route:
+        replenish-rate: 1
+        burst-capacity: 2
+      auth-route:
+        replenish-rate: 2
+        burst-capacity: 5
+      transaction-route:
+        replenish-rate: 10
+        burst-capacity: 20
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,metrics,prometheus"
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      gatewayService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 100
+        failureRateThreshold: 80
+        minimumNumberOfCalls: 50
+        waitDurationInOpenState: 15s
+        permittedNumberOfCallsInHalfOpenState: 3
+

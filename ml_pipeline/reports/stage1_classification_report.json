@@ -1,0 +1,119 @@
+{
+  "stage": "stage1_human_vs_bot",
+  "algorithm": "XGBClassifier",
+  "features": [
+    "SAGE_InterArrival_CV",
+    "SAGE_Timing_Entropy",
+    "SAGE_Pause_Ratio",
+    "SAGE_Burst_Score",
+    "SAGE_Backtrack_Ratio",
+    "SAGE_Path_Entropy",
+    "SAGE_Referral_Chain_Depth",
+    "SAGE_Session_Depth",
+    "SAGE_Method_Diversity",
+    "SAGE_Static_Asset_Ratio",
+    "SAGE_Error_Rate",
+    "SAGE_Payload_Variance"
+  ],
+  "dataset_rows": 100000,
+  "train_rows": 80000,
+  "test_rows": 20000,
+  "class_distribution": {
+    "human": 50000,
+    "bot": 50000
+  },
+  "optimal_threshold": 0.3,
+  "cross_validation": {
+    "mean_accuracy": 1.0,
+    "mean_f1": 1.0,
+    "mean_recall": 1.0,
+    "mean_roc_auc": 1.0
+  },
+  "holdout_metrics": {
+    "accuracy": 1.0,
+    "roc_auc": 1.0,
+    "classification_report": {
+      "Human": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 10000.0
+      },
+      "Bot": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 10000.0
+      },
+      "accuracy": 1.0,
+      "macro avg": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 20000.0
+      },
+      "weighted avg": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 20000.0
+      }
+    },
+    "confusion_matrix": {
+      "true_negatives": 10000,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "true_positives": 10000
+    }
+  },
+  "feature_importance": [
+    {
+      "feature": "SAGE_Burst_Score",
+      "importance": 0.3877710700035095
+    },
+    {
+      "feature": "SAGE_InterArrival_CV",
+      "importance": 0.2170700579881668
+    },
+    {
+      "feature": "SAGE_Referral_Chain_Depth",
+      "importance": 0.1904386729001999
+    },
+    {
+      "feature": "SAGE_Payload_Variance",
+      "importance": 0.10914668440818787
+    },
+    {
+      "feature": "SAGE_Timing_Entropy",
+      "importance": 0.06161770969629288
+    },
+    {
+      "feature": "SAGE_Path_Entropy",
+      "importance": 0.03190027177333832
+    },
+    {
+      "feature": "SAGE_Pause_Ratio",
+      "importance": 0.0018398402025923133
+    },
+    {
+      "feature": "SAGE_Method_Diversity",
+      "importance": 0.0001097252024919726
+    },
+    {
+      "feature": "SAGE_Static_Asset_Ratio",
+      "importance": 7.858047320041806e-05
+    },
+    {
+      "feature": "SAGE_Error_Rate",
+      "importance": 2.7443606086308137e-05
+    },
+    {
+      "feature": "SAGE_Backtrack_Ratio",
+      "importance": 0.0
+    },
+    {
+      "feature": "SAGE_Session_Depth",
+      "importance": 0.0
+    }
+  ]
+}

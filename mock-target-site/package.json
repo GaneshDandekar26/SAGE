@@ -1,0 +1,12 @@
+{
+  "name": "mock-target-site",
+  "version": "1.0.0",
+  "description": "Thin e-commerce shell mock target site",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

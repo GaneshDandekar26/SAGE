@@ -1,0 +1,84 @@
+{
+  "input": "C:\\Users\\deore\\Desktop\\Major-Project\\sage-engine\\ml_pipeline\\data\\training_data_balanced.csv",
+  "model": "C:\\Users\\deore\\Desktop\\Major-Project\\sage-engine\\ml_pipeline\\models\\sage_model.pkl",
+  "rows_total": 24863,
+  "class_counts": {
+    "flood": 16139,
+    "scraper": 7184,
+    "human": 865,
+    "recon": 675
+  },
+  "classification_report": {
+    "flood": {
+      "precision": 0.7800201816347124,
+      "recall": 0.7184014869888475,
+      "f1-score": 0.7479438800193517,
+      "support": 3228.0
+    },
+    "human": {
+      "precision": 0.25668449197860965,
+      "recall": 0.2774566473988439,
+      "f1-score": 0.26666666666666666,
+      "support": 173.0
+    },
+    "recon": {
+      "precision": 0.0964824120603015,
+      "recall": 0.7111111111111111,
+      "f1-score": 0.16991150442477876,
+      "support": 135.0
+    },
+    "scraper": {
+      "precision": 0.9498777506112469,
+      "recall": 0.5407098121085595,
+      "f1-score": 0.6891352549889135,
+      "support": 1437.0
+    },
+    "accuracy": 0.6515181982706616,
+    "macro avg": {
+      "precision": 0.5207662090712176,
+      "recall": 0.5619197644018405,
+      "f1-score": 0.46841432652492765,
+      "support": 4973.0
+    },
+    "weighted avg": {
+      "precision": 0.7923408438941593,
+      "recall": 0.6515181982706616,
+      "f1-score": 0.6985163065658989,
+      "support": 4973.0
+    }
+  },
+  "feature_importance": [
+    {
+      "feature": "SAGE_Endpoint_Concentration",
+      "importance": 0.271083521691492
+    },
+    {
+      "feature": "SAGE_Request_Velocity",
+      "importance": 0.2561897933815045
+    },
+    {
+      "feature": "SAGE_Session_Depth",
+      "importance": 0.15946220383797793
+    },
+    {
+      "feature": "SAGE_Cart_Ratio",
+      "importance": 0.14757654585516247
+    },
+    {
+      "feature": "SAGE_Behavioral_Diversity",
+      "importance": 0.1028409459493848
+    },
+    {
+      "feature": "SAGE_Temporal_Variance",
+      "importance": 0.05502989883589765
+    },
+    {
+      "feature": "SAGE_Asset_Skip_Ratio",
+      "importance": 0.0070177719163876315
+    },
+    {
+      "feature": "SAGE_Sequential_Traversal",
+      "importance": 0.0007993185321931227
+    }
+  ]
+}

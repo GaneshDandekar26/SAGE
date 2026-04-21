@@ -1,0 +1,33 @@
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+*.log
+logs/
+
+# Node dependencies and build output
+node_modules/
+dist/
+build/
+
+# Java build output
+**/target/
+**/*.class
+
+# Python virtual environments and caches
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+*$py.class
+**/.pytest_cache/
+.env
+
+# Local datasets and model artifacts
+/data/
+/ml_pipeline/data/
+/ml_pipeline/inference_service/models/
+
+# Generated evaluation artifacts
+/ml_pipeline/evaluation/
+/ml_pipeline/inference_service/evaluation_report.json
