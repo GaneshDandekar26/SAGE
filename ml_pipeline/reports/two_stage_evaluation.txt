@@ -1,11 +1,11 @@
 ======================================================================
   SAGE 2-Stage Pipeline — End-to-End Evaluation Report
-  Generated: 2026-04-22 01:06:37
+  Generated: 2026-04-22 01:25:25
   Evaluation seed: 99 (different from training seed 42)
 ======================================================================
 
 CONFIGURATION
-  Stage 1 threshold:   0.05
+  Stage 1 threshold:   0.57
   Eval samples/class:  5,000
   Total samples:       20,000
 
@@ -15,29 +15,29 @@ STAGE 1: HUMAN vs BOT (Binary)
 
   CONFUSION MATRIX
            Human    Bot
-  Human     5000      0
-  Bot         46  14954
+  Human     4987     13
+  Bot       1779  13221
 
-  Accuracy:           0.9977
-  Human Recall:       1.0000  ← PRIMARY METRIC
-  Human Precision:    0.9909
-  Bot Recall:         0.9969
-  Bot Precision:      1.0000
+  Accuracy:           0.9104
+  Human Recall:       0.9974  ← PRIMARY METRIC
+  Human Precision:    0.7371
+  Bot Recall:         0.8814
+  Bot Precision:      0.9990
 
-  Humans allowed:     5,000
-  Humans blocked (FP):0  ← MUST BE ZERO OR NEAR-ZERO
-  Bots missed (FN):   46
-  Bots caught:        14,954
+  Humans allowed:     4,987
+  Humans blocked (FP):13  ← MUST BE ZERO OR NEAR-ZERO
+  Bots missed (FN):   1,779
+  Bots caught:        13,221
 
   CLASSIFICATION REPORT
               precision    recall  f1-score   support
 
-       Human       0.99      1.00      1.00      5000
-         Bot       1.00      1.00      1.00     15000
+       Human       0.74      1.00      0.85      5000
+         Bot       1.00      0.88      0.94     15000
 
-    accuracy                           1.00     20000
-   macro avg       1.00      1.00      1.00     20000
-weighted avg       1.00      1.00      1.00     20000
+    accuracy                           0.91     20000
+   macro avg       0.87      0.94      0.89     20000
+weighted avg       0.93      0.91      0.91     20000
 
 
 ──────────────────────────────────────────────────────────────────────
@@ -46,22 +46,22 @@ STAGE 2: ATTACK CLASSIFICATION (3-class, bot-only)
 
   CONFUSION MATRIX
                flood    recon  scraper
-  flood         5000        0        0
-  recon            0     4954        0
-  scraper          0        0     5000
+  flood         4316        0        0
+  recon            0     4537        8
+  scraper          0        0     4360
 
-  Accuracy:  1.0000
+  Accuracy:  0.9994
 
   CLASSIFICATION REPORT
               precision    recall  f1-score   support
 
-       flood       1.00      1.00      1.00      5000
-       recon       1.00      1.00      1.00      4954
-     scraper       1.00      1.00      1.00      5000
+       flood       1.00      1.00      1.00      4316
+       recon       1.00      1.00      1.00      4545
+     scraper       1.00      1.00      1.00      4360
 
-    accuracy                           1.00     14954
-   macro avg       1.00      1.00      1.00     14954
-weighted avg       1.00      1.00      1.00     14954
+    accuracy                           1.00     13221
+   macro avg       1.00      1.00      1.00     13221
+weighted avg       1.00      1.00      1.00     13221
 
 
 ──────────────────────────────────────────────────────────────────────
@@ -70,63 +70,87 @@ COMBINED SYSTEM (4-class end-to-end)
 
   CONFUSION MATRIX (rows=true, cols=predicted)
                human    flood  scraper    recon
-  human         5000        0        0        0
-  flood            0     5000        0        0
-  scraper          0        0     5000        0
-  recon           46        0        0     4954
+  human         4987        0        4        9
+  flood          684     4316        0        0
+  scraper        640        0     4360        0
+  recon          455        0        8     4537
 
-  System Accuracy:    0.9977
-  Human FP Rate:      0.0000
-  System Macro F1:    0.9977
-  System Weighted F1: 0.9977
+  System Accuracy:    0.9100
+  Human FP Rate:      0.0026
+  System Macro F1:    0.9138
+  System Weighted F1: 0.9138
 
   PER-CLASS BREAKDOWN
-    human       Precision=0.9909  Recall=1.0000  F1=0.9954  Support=5000
-    flood       Precision=1.0000  Recall=1.0000  F1=1.0000  Support=5000
-    scraper     Precision=1.0000  Recall=1.0000  F1=1.0000  Support=5000
-    recon       Precision=1.0000  Recall=0.9908  F1=0.9954  Support=5000
+    human       Precision=0.7371  Recall=0.9974  F1=0.8477  Support=5000
+    flood       Precision=1.0000  Recall=0.8632  F1=0.9266  Support=5000
+    scraper     Precision=0.9973  Recall=0.8720  F1=0.9304  Support=5000
+    recon       Precision=0.9980  Recall=0.9074  F1=0.9506  Support=5000
 
   CLASSIFICATION REPORT
               precision    recall  f1-score   support
 
-       flood       1.00      1.00      1.00      5000
-       human       0.99      1.00      1.00      5000
-       recon       1.00      0.99      1.00      5000
-     scraper       1.00      1.00      1.00      5000
+       flood       1.00      0.86      0.93      5000
+       human       0.74      1.00      0.85      5000
+       recon       1.00      0.91      0.95      5000
+     scraper       1.00      0.87      0.93      5000
 
-    accuracy                           1.00     20000
-   macro avg       1.00      1.00      1.00     20000
-weighted avg       1.00      1.00      1.00     20000
+    accuracy                           0.91     20000
+   macro avg       0.93      0.91      0.91     20000
+weighted avg       0.93      0.91      0.91     20000
 
 
 ──────────────────────────────────────────────────────────────────────
 FAILURE CASE ANALYSIS
 ──────────────────────────────────────────────────────────────────────
 
-  Stage 1 False Positives (humans blocked): 0
-  Stage 1 False Negatives (bots missed):    46
+  Stage 1 False Positives (humans blocked): 13
+  Stage 1 False Negatives (bots missed):    1779
+
+  FALSE POSITIVE ANALYSIS (humans wrongly blocked):
+    Count: 13
+    Mean bot_probability: 0.6622
+    Max  bot_probability: 0.7944
+    Min  bot_probability: 0.5732
+    Feature means of misclassified humans vs all humans:
+      SAGE_InterArrival_CV                 FP=0.5421  All=1.1718  ↓0.6297
+      SAGE_Timing_Entropy                  FP=1.0684  All=1.5446  ↓0.4761
+      SAGE_Pause_Ratio                     FP=0.1376  All=0.3533  ↓0.2157
+      SAGE_Burst_Score                     FP=0.1011  All=0.0418  ↑0.0593
+      SAGE_Backtrack_Ratio                 FP=0.0859  All=0.2820  ↓0.1961
+      SAGE_Path_Entropy                    FP=1.7302  All=2.5360  ↓0.8059
+      SAGE_Referral_Chain_Depth            FP=1.5871  All=2.4343  ↓0.8472
+      SAGE_Session_Depth                   FP=24.2308  All=15.0732  ↑9.1576
+      SAGE_Method_Diversity                FP=0.0720  All=0.2210  ↓0.1490
+      SAGE_Static_Asset_Ratio              FP=0.0866  All=0.3190  ↓0.2324
+      SAGE_Error_Rate                      FP=0.0976  All=0.0336  ↑0.0640
+      SAGE_Payload_Variance                FP=129.7643  All=638.0945  ↓508.3303
 
   FALSE NEGATIVE ANALYSIS (bots that slipped through):
-    Count: 46
-    Mean bot_probability: 0.0324
+    Count: 1779
+    Mean bot_probability: 0.1496
     True labels of missed bots:
-      recon: 46
+      flood: 684
+      scraper: 640
+      recon: 455
     Feature means of missed bots vs all bots:
-      SAGE_InterArrival_CV                 FN=0.4484  All=0.2327  ↑0.2157
-      SAGE_Timing_Entropy                  FN=0.7234  All=0.5834  ↑0.1400
-      SAGE_Pause_Ratio                     FN=0.0443  All=0.0297  ↑0.0146
-      SAGE_Burst_Score                     FN=0.0534  All=0.2138  ↓0.1604
-      SAGE_Path_Entropy                    FN=1.1185  All=0.9823  ↑0.1362
-      SAGE_Referral_Chain_Depth            FN=1.6462  All=1.3180  ↑0.3282
-      SAGE_Session_Depth                   FN=16.8261  All=44.9191  ↓28.0930
-      SAGE_Error_Rate                      FN=0.2723  All=0.2212  ↑0.0511
-      SAGE_Payload_Variance                FN=65.3378  All=30.6250  ↑34.7127
+      SAGE_InterArrival_CV                 FN=0.4317  All=0.2281  ↑0.2036
+      SAGE_Timing_Entropy                  FN=0.9931  All=0.6431  ↑0.3501
+      SAGE_Pause_Ratio                     FN=0.1484  All=0.0478  ↑0.1006
+      SAGE_Burst_Score                     FN=0.1052  All=0.1949  ↓0.0897
+      SAGE_Backtrack_Ratio                 FN=0.1075  All=0.0476  ↑0.0600
+      SAGE_Path_Entropy                    FN=1.6172  All=1.1018  ↑0.5154
+      SAGE_Referral_Chain_Depth            FN=1.5935  All=1.3507  ↑0.2427
+      SAGE_Session_Depth                   FN=24.9269  All=39.1041  ↓14.1772
+      SAGE_Method_Diversity                FN=0.1094  All=0.0350  ↑0.0743
+      SAGE_Static_Asset_Ratio              FN=0.1079  All=0.0286  ↑0.0793
+      SAGE_Error_Rate                      FN=0.1105  All=0.2058  ↓0.0953
+      SAGE_Payload_Variance                FN=119.8734  All=45.1776  ↑74.6958
 
 ──────────────────────────────────────────────────────────────────────
 THRESHOLD TUNING GUIDE
 ──────────────────────────────────────────────────────────────────────
 
-  Current threshold: 0.05
+  Current threshold: 0.57
 
   To INCREASE Human recall (fewer humans blocked):
     → Raise threshold (e.g. 0.60, 0.70, 0.80)

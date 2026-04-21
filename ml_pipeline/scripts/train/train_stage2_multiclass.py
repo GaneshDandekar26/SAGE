@@ -1,25 +1,16 @@
 """
-SAGE Stage 2 — Attack Classifier (Flood / Scraper / Recon)
-============================================================
+SAGE Stage 2 — Attack Classifier (v2 — Time-Based Split)
+==========================================================
 
-Purpose:
-    Classify confirmed bots into one of three attack categories so the
-    gateway can apply the correct graduated response:
-        Flood   → IP BAN
-        Scraper → RATE LIMIT
-        Recon   → CAPTCHA
-
-Training strategy:
-    - Trained ONLY on Bot data (no Human rows)
-    - RandomForestClassifier with class_weight='balanced' (no SMOTE)
-    - 80/20 stratified train/test split
-    - 5-fold stratified cross-validation
-    - Reproducible (random_state=42)
+Changes from v1:
+  - Time-based train/test split (zero session overlap)
+  - class_weight='balanced' (no SMOTE)
+  - Trained only on bot data (no human rows)
 
 Outputs:
-    - models/attack_classifier.pkl        — trained model
-    - models/attack_classifier_encoder.pkl — label encoder
-    - reports/attack_classifier.txt        — human-readable report
+  - models/attack_classifier.pkl
+  - models/attack_classifier_encoder.pkl
+  - reports/attack_classifier.txt
 """
 
 import argparse
@@ -38,11 +29,9 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
 )
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.preprocessing import LabelEncoder
 
-
-# ── Constants ────────────────────────────────────────────────────────
 
 RANDOM_STATE = 42
 
@@ -71,92 +60,81 @@ def _resolve_base_dir() -> str:
 BASE_DIR = _resolve_base_dir()
 
 
-# ── Report Writer ────────────────────────────────────────────────────
+def time_based_split(df: pd.DataFrame, test_frac: float = 0.20):
+    """Time-based split: no session overlap."""
+    df_sorted = df.sort_values("timestamp").reset_index(drop=True)
+    split_idx = int(len(df_sorted) * (1 - test_frac))
+    train = df_sorted.iloc[:split_idx].copy()
+    test = df_sorted.iloc[split_idx:].copy()
 
-def write_text_report(
-    path: str,
-    *,
-    features: list[str],
-    classes: list[str],
-    dataset_rows: int,
-    train_rows: int,
-    test_rows: int,
-    class_dist: dict,
-    cv_results: dict,
-    accuracy: float,
-    report_str: str,
-    cm: np.ndarray,
-    importance: list[tuple[str, float]],
-) -> None:
-    """Write a human-readable evaluation report as plain text."""
+    overlap = set(train["session_id"]) & set(test["session_id"])
+    assert len(overlap) == 0, f"SESSION LEAK: {len(overlap)} sessions in both sets!"
+    return train, test
+
+
+def write_report(path, **kw):
     lines = [
         "=" * 70,
-        "  SAGE Stage 2 — Attack Classifier Evaluation Report",
+        "  SAGE Stage 2 — Attack Classifier (v2 — Time-Based Split)",
         f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "=" * 70,
         "",
         "MODEL",
         "  Algorithm:    RandomForestClassifier",
-        f"  Features:     {len(features)}",
-        f"  Classes:      {', '.join(classes)}",
+        f"  Features:     {len(STAGE2_FEATURES)}",
+        f"  Classes:      {', '.join(kw['classes'])}",
+        f"  Split method: TIME-BASED (first 80% → train, last 20% → test)",
         "",
-        "DATASET (Bot-only — no human rows)",
-        f"  Total rows:   {dataset_rows:,}",
-        f"  Train rows:   {train_rows:,}",
-        f"  Test rows:    {test_rows:,}",
+        "DATASET (Bot-only)",
+        f"  Total:   {kw['total']:,}",
+        f"  Train:   {kw['n_train']:,}",
+        f"  Test:    {kw['n_test']:,}",
+        f"  Session overlap: 0  (verified)",
     ]
-    for cls, count in sorted(class_dist.items()):
-        lines.append(f"  {cls:<12s}   {count:,}")
+    for cls, cnt in sorted(kw["class_dist"].items()):
+        lines.append(f"  {cls:<12s} {cnt:,}")
 
     lines += [
         "",
-        "CROSS-VALIDATION (5-fold stratified)",
+        "CROSS-VALIDATION (5-fold stratified, TRAIN set only)",
     ]
-    for metric in ["accuracy", "f1_macro", "recall_macro", "precision_macro"]:
-        key = f"test_{metric}"
-        if key in cv_results:
-            vals = cv_results[key]
-            lines.append(f"  {metric:<18s}  {vals.mean():.4f}  (±{vals.std():.4f})")
+    for metric, vals in kw["cv"].items():
+        lines.append(f"  {metric:<20s}  {vals.mean():.4f}  (±{vals.std():.4f})")
 
     lines += [
         "",
-        "HOLDOUT METRICS",
-        f"  Accuracy:      {accuracy:.4f}",
+        "HOLDOUT METRICS (time-based test set)",
+        f"  Accuracy:  {kw['accuracy']:.4f}",
         "",
         "CONFUSION MATRIX",
     ]
-
-    # Format confusion matrix as a labeled table
-    col_header = "          " + "  ".join(f"{c:>10s}" for c in classes)
-    lines.append(col_header)
-    for i, row_label in enumerate(classes):
-        row_vals = "  ".join(f"{cm[i, j]:>10d}" for j in range(len(classes)))
-        lines.append(f"  {row_label:<8s} {row_vals}")
+    cm = kw["cm"]
+    cls = kw["classes"]
+    col_w = max(len(c) for c in cls) + 2
+    num_w = max(col_w, len(str(cm.max())) + 2)
+    header = " " * (col_w + 2) + "".join(f"{c:>{num_w}}" for c in cls)
+    lines.append(header)
+    for i, label in enumerate(cls):
+        row = f"  {label:<{col_w}}" + "".join(f"{cm[i, j]:>{num_w}}" for j in range(len(cls)))
+        lines.append(row)
 
     lines += [
         "",
         "CLASSIFICATION REPORT",
-        report_str,
+        kw["report_str"],
         "",
         "FEATURE IMPORTANCE",
     ]
-    for name, score in importance:
+    for name, score in kw["importance"]:
         bar = "█" * int(score * 50)
         lines.append(f"  {name:<35s}  {score:.4f}  {bar}")
 
     lines += [
         "",
-        "FEATURES USED",
-    ]
-    for i, f in enumerate(features, 1):
-        lines.append(f"  {i:2d}. {f}")
-
-    lines += [
-        "",
         "GRADUATED RESPONSE MAP",
-        "  Flood   → IP BAN      (5 min)",
-        "  Scraper → RATE LIMIT  (10 min)",
-        "  Recon   → CAPTCHA     (30 min)",
+        "  Flood   → IP BAN",
+        "  Scraper → RATE LIMIT",
+        "  Recon   → CAPTCHA",
         "",
         "=" * 70,
     ]
@@ -166,143 +144,121 @@ def write_text_report(
         f.write("\n".join(lines) + "\n")
 
 
-# ── Main ─────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Train Stage 2: Attack classifier (Flood/Scraper/Recon)"
+        description="Train Stage 2 (v2): time-based split, overlapping data"
     )
-    parser.add_argument(
-        "--input",
-        default=os.path.join(BASE_DIR, "data", "stage2_training_data.csv"),
-    )
-    parser.add_argument(
-        "--output-model",
-        default=os.path.join(BASE_DIR, "models", "attack_classifier.pkl"),
-    )
-    parser.add_argument(
-        "--output-encoder",
-        default=os.path.join(BASE_DIR, "models", "attack_classifier_encoder.pkl"),
-    )
-    parser.add_argument(
-        "--output-report",
-        default=os.path.join(BASE_DIR, "reports", "attack_classifier.txt"),
-    )
+    parser.add_argument("--input",
+                        default=os.path.join(BASE_DIR, "data", "stage2_training_data.csv"))
+    parser.add_argument("--output-model",
+                        default=os.path.join(BASE_DIR, "models", "attack_classifier.pkl"))
+    parser.add_argument("--output-encoder",
+                        default=os.path.join(BASE_DIR, "models", "attack_classifier_encoder.pkl"))
+    parser.add_argument("--output-report",
+                        default=os.path.join(BASE_DIR, "reports", "attack_classifier.txt"))
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("SAGE Stage 2: Attack Classifier — Flood / Scraper / Recon")
-    print("=" * 60)
+    print("=" * 65)
+    print("  SAGE Stage 2: Attack Classifier (v2 — Time-Based Split)")
+    print("=" * 65)
 
-    # ── 1. Load ──────────────────────────────────────────────────────
+    # ── Load ─────────────────────────────────────────────────────────
     print(f"\n[1/5] Loading {args.input} ...")
     df = pd.read_csv(args.input)
     df = df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
-    missing = [c for c in STAGE2_FEATURES + ["label"] if c not in df.columns]
-    if missing:
-        print(f"FATAL: Missing columns: {missing}", file=sys.stderr)
-        sys.exit(1)
-
-    # Verify no human rows leaked in
     if "human" in df["label"].values:
-        print("WARNING: Removing human rows — Stage 2 is bot-only")
+        print("    WARNING: Removing human rows (Stage 2 is bot-only)")
         df = df[df["label"] != "human"].copy()
 
-    X = df[STAGE2_FEATURES]
+    X_all = df[STAGE2_FEATURES]
     y_raw = df["label"]
-
     label_encoder = LabelEncoder()
-    y = label_encoder.fit_transform(y_raw)
+    y_all = label_encoder.fit_transform(y_raw)
     classes = label_encoder.classes_.tolist()
-
     class_dist = {k: int(v) for k, v in y_raw.value_counts().to_dict().items()}
-    print(f"    Rows:    {len(df):,}")
-    print(f"    Classes: {classes}")
-    for cls, count in sorted(class_dist.items()):
-        print(f"      {cls}: {count:,}")
 
-    # ── 2. Split ─────────────────────────────────────────────────────
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y,
-    )
+    print(f"    Total: {len(df):,}  Classes: {classes}")
 
-    # ── 3. Train ─────────────────────────────────────────────────────
-    print("\n[2/5] Training RandomForestClassifier ...")
+    # ── Time-based split ─────────────────────────────────────────────
+    print("[2/5] Time-based train/test split (80/20) ...")
+    train_df, test_df = time_based_split(df, test_frac=0.20)
+
+    X_train = train_df[STAGE2_FEATURES]
+    y_train = label_encoder.transform(train_df["label"])
+    X_test = test_df[STAGE2_FEATURES]
+    y_test = label_encoder.transform(test_df["label"])
+
+    print(f"    Train: {len(X_train):,}")
+    print(f"    Test:  {len(X_test):,}")
+
+    # ── Train ────────────────────────────────────────────────────────
+    print("\n[3/5] Training RandomForestClassifier ...")
     model = RandomForestClassifier(
-        n_estimators=150,
+        n_estimators=200,
         max_depth=12,
         min_samples_leaf=5,
         max_samples=0.8,
-        class_weight="balanced",     # handles imbalance via class weights (no SMOTE)
+        class_weight="balanced",
         random_state=RANDOM_STATE,
         n_jobs=-1,
     )
     model.fit(X_train, y_train)
 
-    # ── 4. Cross-validation ──────────────────────────────────────────
-    print("\n[3/5] 5-fold cross-validation ...")
+    # ── CV on train only ─────────────────────────────────────────────
+    print("[4/5] 5-fold CV (train set only) ...")
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-    cv_results = cross_validate(
-        model, X, y, cv=cv,
+    cv_res = cross_validate(
+        model, X_train, y_train, cv=cv,
         scoring=["accuracy", "f1_macro", "recall_macro", "precision_macro"],
         n_jobs=-1,
     )
-    for metric in ["accuracy", "f1_macro", "recall_macro", "precision_macro"]:
-        vals = cv_results[f"test_{metric}"]
-        print(f"    {metric:<18s} {vals.mean():.4f} (±{vals.std():.4f})")
+    cv_dict = {m: cv_res[f"test_{m}"] for m in ["accuracy", "f1_macro", "recall_macro", "precision_macro"]}
+    for m, v in cv_dict.items():
+        print(f"    {m:<20s} {v.mean():.4f} (±{v.std():.4f})")
 
-    # ── 5. Holdout evaluation ────────────────────────────────────────
-    print("\n[4/5] Holdout evaluation ...")
+    # ── Holdout ──────────────────────────────────────────────────────
+    print("\n[5/5] Holdout evaluation ...")
     y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
+    acc = accuracy_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
-
     report_str = classification_report(y_test, y_pred, target_names=classes)
 
-    print(f"    Accuracy:   {accuracy:.4f}")
-    for cls in classes:
-        idx = label_encoder.transform([cls])[0]
+    print(f"    Accuracy: {acc:.4f}")
+    for cls_name in classes:
+        idx = label_encoder.transform([cls_name])[0]
         tp = cm[idx, idx]
         total = cm[idx].sum()
-        recall = tp / max(total, 1)
-        print(f"    {cls:>8s} recall: {recall:.4f}  ({tp}/{total})")
+        print(f"    {cls_name:>8s} recall: {tp / max(total, 1):.4f}  ({tp}/{total})")
 
-    # Feature importance
     importance = sorted(
         zip(STAGE2_FEATURES, model.feature_importances_),
         key=lambda x: x[1], reverse=True,
     )
-    print("\n    Feature Importances:")
-    for name, score in importance:
-        print(f"      {name:<35s} {score:.4f}")
 
-    # ── 6. Save ──────────────────────────────────────────────────────
-    print(f"\n[5/5] Saving artifacts ...")
+    # ── Save ─────────────────────────────────────────────────────────
     os.makedirs(os.path.dirname(args.output_model), exist_ok=True)
-
     joblib.dump(model, args.output_model, compress=3)
     joblib.dump(label_encoder, args.output_encoder, compress=3)
 
-    write_text_report(
+    write_report(
         args.output_report,
-        features=STAGE2_FEATURES,
         classes=classes,
-        dataset_rows=len(df),
-        train_rows=len(X_train),
-        test_rows=len(X_test),
+        total=len(df),
+        n_train=len(X_train),
+        n_test=len(X_test),
         class_dist=class_dist,
-        cv_results=cv_results,
-        accuracy=accuracy,
-        report_str=report_str,
+        cv=cv_dict,
+        accuracy=acc,
         cm=cm,
+        report_str=report_str,
         importance=importance,
     )
 
-    print(f"    Model:   {args.output_model}")
+    print(f"\n    Model:   {args.output_model}")
     print(f"    Encoder: {args.output_encoder}")
     print(f"    Report:  {args.output_report}")
-    print("=" * 60)
+    print("=" * 65)
 
 
 if __name__ == "__main__":

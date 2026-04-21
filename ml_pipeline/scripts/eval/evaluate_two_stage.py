@@ -83,127 +83,211 @@ BASE_DIR = _resolve_base_dir()
 def _generate_eval_data(n: int) -> pd.DataFrame:
     """
     Generate synthetic evaluation data with 4 true classes.
-    Uses RANDOM_STATE=99 (different from training seed=42) to ensure
-    no data leakage between training and evaluation sets.
+
+    Uses DIFFERENT distribution parameters than training (shifted centers,
+    slightly different spreads) to simulate real-world concept drift.
+    Includes 15% borderline samples per class to test decision boundaries.
+
+    Seed=99 (different from training seed=42).
     """
-    np.random.seed(RANDOM_STATE)
+    rng = np.random.default_rng(RANDOM_STATE)
     frames = []
 
-    # ── HUMAN ────────────────────────────────────────────────────────
-    human = {
-        "SAGE_InterArrival_CV":       np.random.uniform(0.6, 2.2, n),
-        "SAGE_Timing_Entropy":        np.random.uniform(1.6, 2.3, n),
-        "SAGE_Pause_Ratio":           np.random.uniform(0.25, 0.65, n),
-        "SAGE_Burst_Score":           np.random.exponential(0.012, n).clip(0, 0.08),
-        "SAGE_Backtrack_Ratio":       np.random.uniform(0.15, 0.55, n),
-        "SAGE_Path_Entropy":          np.random.uniform(2.2, 4.2, n),
-        "SAGE_Referral_Chain_Depth":  np.random.uniform(1.8, 3.8, n),
-        "SAGE_Session_Depth":         np.random.lognormal(2.5, 0.7, n).clip(3, 150).astype(int),
-        "SAGE_Method_Diversity":      np.random.uniform(0.12, 0.35, n),
-        "SAGE_Static_Asset_Ratio":    np.random.uniform(0.22, 0.55, n),
-        "SAGE_Error_Rate":            np.random.exponential(0.02, n).clip(0, 0.12),
-        "SAGE_Payload_Variance":      np.random.uniform(60, 1800, n),
-        "SAGE_Request_Velocity":      np.random.uniform(1, 15, n),
-        "SAGE_Peak_Burst_RPS":        np.random.uniform(1, 5, n),
-        "SAGE_Velocity_Trend":        np.random.normal(0, 1, n),
-        "SAGE_Endpoint_Concentration": np.random.uniform(0.1, 0.5, n),
-        "SAGE_Cart_Ratio":            np.random.uniform(0.05, 0.3, n),
-        "SAGE_Sequential_Traversal":  np.random.exponential(0.05, n).clip(0, 0.2),
-        "SAGE_Sensitive_Endpoint_Ratio": np.random.exponential(0.01, n).clip(0, 0.05),
-        "SAGE_UA_Entropy":            np.random.uniform(0, 0.5, n),
-        "SAGE_Header_Completeness":   np.random.uniform(0.85, 1.0, n),
-        "SAGE_Response_Size_Variance": np.random.uniform(100, 3000, n),
-    }
-    df = pd.DataFrame(human)
-    df["true_label"] = "human"
-    frames.append(df)
+    def _noisy(c, s, num):
+        return np.abs(rng.normal(c, s, num))
 
-    # ── FLOOD ────────────────────────────────────────────────────────
-    flood = {
-        "SAGE_InterArrival_CV":       np.random.uniform(0.0, 0.3, n),
-        "SAGE_Timing_Entropy":        np.random.uniform(0.0, 0.8, n),
-        "SAGE_Pause_Ratio":           np.random.exponential(0.02, n).clip(0, 0.1),
-        "SAGE_Burst_Score":           np.random.uniform(0.1, 0.5, n),
-        "SAGE_Backtrack_Ratio":       np.random.exponential(0.03, n).clip(0, 0.08),
-        "SAGE_Path_Entropy":          np.random.uniform(0.1, 1.2, n),
-        "SAGE_Referral_Chain_Depth":  np.random.uniform(1.0, 1.5, n),
-        "SAGE_Session_Depth":         np.random.lognormal(4, 1, n).clip(20, 5000).astype(int),
-        "SAGE_Method_Diversity":      np.random.exponential(0.01, n).clip(0, 0.05),
-        "SAGE_Static_Asset_Ratio":    np.random.exponential(0.01, n).clip(0, 0.04),
-        "SAGE_Error_Rate":            np.random.uniform(0.05, 0.3, n),
-        "SAGE_Payload_Variance":      np.random.uniform(0, 40, n),
-        "SAGE_Request_Velocity":      np.random.uniform(50, 500, n),
-        "SAGE_Peak_Burst_RPS":        np.random.uniform(40, 500, n),
-        "SAGE_Velocity_Trend":        np.random.normal(0, 2, n),
-        "SAGE_Endpoint_Concentration": np.random.uniform(0.88, 1.0, n),
-        "SAGE_Cart_Ratio":            np.zeros(n),
-        "SAGE_Sequential_Traversal":  np.random.exponential(0.02, n).clip(0, 0.08),
-        "SAGE_Sensitive_Endpoint_Ratio": np.random.exponential(0.02, n).clip(0, 0.08),
-        "SAGE_UA_Entropy":            np.random.exponential(0.04, n).clip(0, 0.2),
-        "SAGE_Header_Completeness":   np.random.uniform(0.0, 0.2, n),
-        "SAGE_Response_Size_Variance": np.random.exponential(8, n).clip(0, 40),
-    }
-    df = pd.DataFrame(flood)
-    df["true_label"] = "flood"
-    frames.append(df)
+    def _bounded(lo, hi, num):
+        base = rng.uniform(lo, hi, num)
+        noise = rng.normal(0, (hi - lo) * 0.08, num)
+        return np.clip(base + noise, lo * 0.7, hi * 1.3)
 
-    # ── SCRAPER ──────────────────────────────────────────────────────
-    scraper = {
-        "SAGE_InterArrival_CV":       np.random.uniform(0.05, 0.45, n),
-        "SAGE_Timing_Entropy":        np.random.uniform(0.2, 1.0, n),
-        "SAGE_Pause_Ratio":           np.random.exponential(0.03, n).clip(0, 0.12),
-        "SAGE_Burst_Score":           np.random.uniform(0.05, 0.35, n),
-        "SAGE_Backtrack_Ratio":       np.random.exponential(0.04, n).clip(0, 0.12),
-        "SAGE_Path_Entropy":          np.random.uniform(0.3, 1.8, n),
-        "SAGE_Referral_Chain_Depth":  np.random.uniform(1.0, 1.6, n),
-        "SAGE_Session_Depth":         np.random.lognormal(3, 0.8, n).clip(10, 2000).astype(int),
-        "SAGE_Method_Diversity":      np.random.exponential(0.02, n).clip(0, 0.08),
-        "SAGE_Static_Asset_Ratio":    np.random.exponential(0.015, n).clip(0, 0.06),
-        "SAGE_Error_Rate":            np.random.uniform(0.08, 0.35, n),
-        "SAGE_Payload_Variance":      np.random.uniform(0, 60, n),
-        "SAGE_Request_Velocity":      np.random.uniform(12, 70, n),
-        "SAGE_Peak_Burst_RPS":        np.random.uniform(5, 25, n),
-        "SAGE_Velocity_Trend":        np.random.normal(-1, 2, n),
-        "SAGE_Endpoint_Concentration": np.random.uniform(0.35, 0.65, n),
-        "SAGE_Cart_Ratio":            np.random.exponential(0.003, n).clip(0, 0.02),
-        "SAGE_Sequential_Traversal":  np.random.uniform(0.45, 0.9, n),
-        "SAGE_Sensitive_Endpoint_Ratio": np.random.exponential(0.02, n).clip(0, 0.07),
-        "SAGE_UA_Entropy":            np.random.uniform(1.6, 3.2, n),
-        "SAGE_Header_Completeness":   np.random.uniform(0.75, 1.0, n),
-        "SAGE_Response_Size_Variance": np.random.uniform(250, 4500, n),
-    }
-    df = pd.DataFrame(scraper)
-    df["true_label"] = "scraper"
-    frames.append(df)
+    # ── HUMAN (85% typical + 15% borderline) ─────────────────────────
+    n_typ = int(n * 0.85)
+    n_brd = n - n_typ
 
-    # ── RECON ────────────────────────────────────────────────────────
-    recon = {
-        "SAGE_InterArrival_CV":       np.random.uniform(0.1, 0.5, n),
-        "SAGE_Timing_Entropy":        np.random.uniform(0.3, 1.2, n),
-        "SAGE_Pause_Ratio":           np.random.exponential(0.04, n).clip(0, 0.15),
-        "SAGE_Burst_Score":           np.random.uniform(0.03, 0.25, n),
-        "SAGE_Backtrack_Ratio":       np.random.exponential(0.05, n).clip(0, 0.15),
-        "SAGE_Path_Entropy":          np.random.uniform(0.5, 2.0, n),
-        "SAGE_Referral_Chain_Depth":  np.random.uniform(1.0, 1.8, n),
-        "SAGE_Session_Depth":         np.random.lognormal(2.5, 0.6, n).clip(5, 500).astype(int),
-        "SAGE_Method_Diversity":      np.random.exponential(0.03, n).clip(0, 0.12),
-        "SAGE_Static_Asset_Ratio":    np.random.exponential(0.02, n).clip(0, 0.08),
-        "SAGE_Error_Rate":            np.random.uniform(0.1, 0.45, n),
-        "SAGE_Payload_Variance":      np.random.uniform(5, 80, n),
-        "SAGE_Request_Velocity":      np.random.uniform(3, 22, n),
-        "SAGE_Peak_Burst_RPS":        np.random.uniform(1, 8, n),
-        "SAGE_Velocity_Trend":        np.random.uniform(3, 12, n),
-        "SAGE_Endpoint_Concentration": np.random.uniform(0.08, 0.3, n),
-        "SAGE_Cart_Ratio":            np.zeros(n),
-        "SAGE_Sequential_Traversal":  np.random.exponential(0.08, n).clip(0, 0.25),
-        "SAGE_Sensitive_Endpoint_Ratio": np.random.uniform(0.35, 0.85, n),
-        "SAGE_UA_Entropy":            np.random.uniform(0.0, 0.8, n),
-        "SAGE_Header_Completeness":   np.random.uniform(0.45, 0.75, n),
-        "SAGE_Response_Size_Variance": np.random.uniform(60, 900, n),
+    # Typical humans
+    typical_h = {
+        "SAGE_InterArrival_CV":      _noisy(1.3, 0.50, n_typ),
+        "SAGE_Timing_Entropy":       _bounded(1.1, 2.2, n_typ),
+        "SAGE_Pause_Ratio":          _bounded(0.18, 0.60, n_typ),
+        "SAGE_Burst_Score":          rng.exponential(0.028, n_typ).clip(0, 0.22),
+        "SAGE_Backtrack_Ratio":      _bounded(0.12, 0.50, n_typ),
+        "SAGE_Path_Entropy":         _bounded(1.6, 3.8, n_typ),
+        "SAGE_Referral_Chain_Depth": _bounded(1.6, 3.6, n_typ),
+        "SAGE_Session_Depth":        rng.lognormal(2.4, 0.7, n_typ).clip(3, 180).astype(int),
+        "SAGE_Method_Diversity":     _bounded(0.10, 0.38, n_typ),
+        "SAGE_Static_Asset_Ratio":   _bounded(0.18, 0.52, n_typ),
+        "SAGE_Error_Rate":           rng.exponential(0.022, n_typ).clip(0, 0.18),
+        "SAGE_Payload_Variance":     _bounded(50, 1400, n_typ),
     }
-    df = pd.DataFrame(recon)
-    df["true_label"] = "recon"
-    frames.append(df)
+    # Borderline humans (overlap w/ bot ranges)
+    border_h = {
+        "SAGE_InterArrival_CV":      _noisy(0.40, 0.18, n_brd),
+        "SAGE_Timing_Entropy":       _bounded(0.5, 1.4, n_brd),
+        "SAGE_Pause_Ratio":          _bounded(0.04, 0.22, n_brd),
+        "SAGE_Burst_Score":          _bounded(0.06, 0.18, n_brd),
+        "SAGE_Backtrack_Ratio":      _bounded(0.04, 0.22, n_brd),
+        "SAGE_Path_Entropy":         _bounded(0.9, 2.3, n_brd),
+        "SAGE_Referral_Chain_Depth": _bounded(1.1, 2.0, n_brd),
+        "SAGE_Session_Depth":        rng.lognormal(2.8, 0.9, n_brd).clip(5, 450).astype(int),
+        "SAGE_Method_Diversity":     _bounded(0.04, 0.18, n_brd),
+        "SAGE_Static_Asset_Ratio":   _bounded(0.04, 0.22, n_brd),
+        "SAGE_Error_Rate":           _bounded(0.04, 0.16, n_brd),
+        "SAGE_Payload_Variance":     _bounded(15, 280, n_brd),
+    }
+    df_h = pd.concat([pd.DataFrame(typical_h), pd.DataFrame(border_h)], ignore_index=True)
+
+    # Add Stage 2 features (less meaningful for humans but needed)
+    df_h["SAGE_Request_Velocity"] = rng.uniform(1, 15, n)
+    df_h["SAGE_Peak_Burst_RPS"] = rng.uniform(1, 5, n)
+    df_h["SAGE_Velocity_Trend"] = rng.normal(0, 1, n)
+    df_h["SAGE_Endpoint_Concentration"] = rng.uniform(0.1, 0.5, n)
+    df_h["SAGE_Cart_Ratio"] = rng.uniform(0.05, 0.3, n)
+    df_h["SAGE_Sequential_Traversal"] = rng.exponential(0.05, n).clip(0, 0.2)
+    df_h["SAGE_Sensitive_Endpoint_Ratio"] = rng.exponential(0.01, n).clip(0, 0.05)
+    df_h["SAGE_UA_Entropy"] = rng.uniform(0, 0.5, n)
+    df_h["SAGE_Header_Completeness"] = rng.uniform(0.85, 1.0, n)
+    df_h["SAGE_Response_Size_Variance"] = rng.uniform(100, 3000, n)
+    df_h["true_label"] = "human"
+    frames.append(df_h)
+
+    # ── FLOOD (85% core + 15% moderate floods) ──────────────────────
+    n_typ = int(n * 0.85)
+    n_brd = n - n_typ
+
+    core_f = {
+        "SAGE_InterArrival_CV":      _noisy(0.14, 0.10, n_typ),
+        "SAGE_Timing_Entropy":       _bounded(0.0, 0.9, n_typ),
+        "SAGE_Pause_Ratio":          rng.exponential(0.025, n_typ).clip(0, 0.12),
+        "SAGE_Burst_Score":          _bounded(0.12, 0.50, n_typ),
+        "SAGE_Backtrack_Ratio":      rng.exponential(0.035, n_typ).clip(0, 0.12),
+        "SAGE_Path_Entropy":         _bounded(0.1, 1.6, n_typ),
+        "SAGE_Referral_Chain_Depth": _bounded(1.0, 1.6, n_typ),
+        "SAGE_Session_Depth":        rng.lognormal(3.8, 1.0, n_typ).clip(20, 5000).astype(int),
+        "SAGE_Method_Diversity":     rng.exponential(0.020, n_typ).clip(0, 0.10),
+        "SAGE_Static_Asset_Ratio":   rng.exponential(0.015, n_typ).clip(0, 0.07),
+        "SAGE_Error_Rate":           _bounded(0.06, 0.35, n_typ),
+        "SAGE_Payload_Variance":     _bounded(0, 50, n_typ),
+    }
+    brd_f = {
+        "SAGE_InterArrival_CV":      _noisy(0.35, 0.15, n_brd),
+        "SAGE_Timing_Entropy":       _bounded(0.5, 1.3, n_brd),
+        "SAGE_Pause_Ratio":          _bounded(0.05, 0.20, n_brd),
+        "SAGE_Burst_Score":          _bounded(0.06, 0.18, n_brd),
+        "SAGE_Backtrack_Ratio":      _bounded(0.04, 0.15, n_brd),
+        "SAGE_Path_Entropy":         _bounded(0.8, 2.2, n_brd),
+        "SAGE_Referral_Chain_Depth": _bounded(1.0, 1.8, n_brd),
+        "SAGE_Session_Depth":        rng.lognormal(3.0, 0.9, n_brd).clip(10, 2000).astype(int),
+        "SAGE_Method_Diversity":     _bounded(0.04, 0.15, n_brd),
+        "SAGE_Static_Asset_Ratio":   _bounded(0.03, 0.15, n_brd),
+        "SAGE_Error_Rate":           _bounded(0.04, 0.20, n_brd),
+        "SAGE_Payload_Variance":     _bounded(10, 150, n_brd),
+    }
+    df_f = pd.concat([pd.DataFrame(core_f), pd.DataFrame(brd_f)], ignore_index=True)
+    df_f["SAGE_Request_Velocity"] = _bounded(60, 500, n)
+    df_f["SAGE_Peak_Burst_RPS"] = _bounded(45, 500, n)
+    df_f["SAGE_Velocity_Trend"] = rng.normal(0, 2, n)
+    df_f["SAGE_Endpoint_Concentration"] = _bounded(0.75, 1.0, n)
+    df_f["SAGE_Cart_Ratio"] = rng.exponential(0.005, n).clip(0, 0.03)
+    df_f["SAGE_Sequential_Traversal"] = rng.exponential(0.03, n).clip(0, 0.15)
+    df_f["SAGE_Sensitive_Endpoint_Ratio"] = rng.exponential(0.03, n).clip(0, 0.12)
+    df_f["SAGE_UA_Entropy"] = rng.exponential(0.06, n).clip(0, 0.4)
+    df_f["SAGE_Header_Completeness"] = _bounded(0.0, 0.30, n)
+    df_f["SAGE_Response_Size_Variance"] = rng.exponential(12, n).clip(0, 60)
+    df_f["true_label"] = "flood"
+    frames.append(df_f)
+
+    # ── SCRAPER (85% core + 15% borderline) ──────────────────────────
+    n_typ = int(n * 0.85)
+    n_brd = n - n_typ
+
+    core_s = {
+        "SAGE_InterArrival_CV":      _noisy(0.18, 0.12, n_typ),
+        "SAGE_Timing_Entropy":       _bounded(0.2, 0.95, n_typ),
+        "SAGE_Pause_Ratio":          rng.exponential(0.028, n_typ).clip(0, 0.11),
+        "SAGE_Burst_Score":          _bounded(0.06, 0.32, n_typ),
+        "SAGE_Backtrack_Ratio":      rng.exponential(0.035, n_typ).clip(0, 0.11),
+        "SAGE_Path_Entropy":         _bounded(0.3, 1.6, n_typ),
+        "SAGE_Referral_Chain_Depth": _bounded(1.0, 1.5, n_typ),
+        "SAGE_Session_Depth":        rng.lognormal(3.2, 0.8, n_typ).clip(10, 2000).astype(int),
+        "SAGE_Method_Diversity":     rng.exponential(0.018, n_typ).clip(0, 0.08),
+        "SAGE_Static_Asset_Ratio":   rng.exponential(0.012, n_typ).clip(0, 0.05),
+        "SAGE_Error_Rate":           _bounded(0.08, 0.33, n_typ),
+        "SAGE_Payload_Variance":     _bounded(0, 55, n_typ),
+    }
+    brd_s = {
+        "SAGE_InterArrival_CV":      _noisy(0.50, 0.20, n_brd),
+        "SAGE_Timing_Entropy":       _bounded(0.6, 1.5, n_brd),
+        "SAGE_Pause_Ratio":          _bounded(0.08, 0.25, n_brd),
+        "SAGE_Burst_Score":          _bounded(0.04, 0.15, n_brd),
+        "SAGE_Backtrack_Ratio":      _bounded(0.04, 0.18, n_brd),
+        "SAGE_Path_Entropy":         _bounded(0.9, 2.4, n_brd),
+        "SAGE_Referral_Chain_Depth": _bounded(1.2, 2.2, n_brd),
+        "SAGE_Session_Depth":        rng.lognormal(2.8, 0.7, n_brd).clip(5, 800).astype(int),
+        "SAGE_Method_Diversity":     _bounded(0.04, 0.18, n_brd),
+        "SAGE_Static_Asset_Ratio":   _bounded(0.04, 0.20, n_brd),
+        "SAGE_Error_Rate":           _bounded(0.03, 0.16, n_brd),
+        "SAGE_Payload_Variance":     _bounded(15, 250, n_brd),
+    }
+    df_s = pd.concat([pd.DataFrame(core_s), pd.DataFrame(brd_s)], ignore_index=True)
+    df_s["SAGE_Request_Velocity"] = _bounded(12, 75, n)
+    df_s["SAGE_Peak_Burst_RPS"] = _bounded(5, 30, n)
+    df_s["SAGE_Velocity_Trend"] = rng.normal(-1, 2.5, n)
+    df_s["SAGE_Endpoint_Concentration"] = _bounded(0.28, 0.62, n)
+    df_s["SAGE_Cart_Ratio"] = rng.exponential(0.004, n).clip(0, 0.03)
+    df_s["SAGE_Sequential_Traversal"] = _bounded(0.42, 0.88, n)
+    df_s["SAGE_Sensitive_Endpoint_Ratio"] = rng.exponential(0.025, n).clip(0, 0.08)
+    df_s["SAGE_UA_Entropy"] = _bounded(1.3, 3.0, n)
+    df_s["SAGE_Header_Completeness"] = _bounded(0.68, 1.0, n)
+    df_s["SAGE_Response_Size_Variance"] = _bounded(180, 4200, n)
+    df_s["true_label"] = "scraper"
+    frames.append(df_s)
+
+    # ── RECON (85% core + 15% borderline) ────────────────────────────
+    n_typ = int(n * 0.85)
+    n_brd = n - n_typ
+
+    core_r = {
+        "SAGE_InterArrival_CV":      _noisy(0.22, 0.14, n_typ),
+        "SAGE_Timing_Entropy":       _bounded(0.3, 1.1, n_typ),
+        "SAGE_Pause_Ratio":          rng.exponential(0.035, n_typ).clip(0, 0.14),
+        "SAGE_Burst_Score":          _bounded(0.04, 0.23, n_typ),
+        "SAGE_Backtrack_Ratio":      rng.exponential(0.045, n_typ).clip(0, 0.14),
+        "SAGE_Path_Entropy":         _bounded(0.5, 1.9, n_typ),
+        "SAGE_Referral_Chain_Depth": _bounded(1.0, 1.7, n_typ),
+        "SAGE_Session_Depth":        rng.lognormal(2.6, 0.6, n_typ).clip(5, 500).astype(int),
+        "SAGE_Method_Diversity":     rng.exponential(0.028, n_typ).clip(0, 0.11),
+        "SAGE_Static_Asset_Ratio":   rng.exponential(0.018, n_typ).clip(0, 0.07),
+        "SAGE_Error_Rate":           _bounded(0.10, 0.42, n_typ),
+        "SAGE_Payload_Variance":     _bounded(5, 75, n_typ),
+    }
+    brd_r = {
+        "SAGE_InterArrival_CV":      _noisy(0.55, 0.22, n_brd),
+        "SAGE_Timing_Entropy":       _bounded(0.7, 1.6, n_brd),
+        "SAGE_Pause_Ratio":          _bounded(0.08, 0.28, n_brd),
+        "SAGE_Burst_Score":          _bounded(0.03, 0.14, n_brd),
+        "SAGE_Backtrack_Ratio":      _bounded(0.05, 0.20, n_brd),
+        "SAGE_Path_Entropy":         _bounded(1.0, 2.5, n_brd),
+        "SAGE_Referral_Chain_Depth": _bounded(1.3, 2.3, n_brd),
+        "SAGE_Session_Depth":        rng.lognormal(2.8, 0.8, n_brd).clip(5, 600).astype(int),
+        "SAGE_Method_Diversity":     _bounded(0.05, 0.20, n_brd),
+        "SAGE_Static_Asset_Ratio":   _bounded(0.04, 0.18, n_brd),
+        "SAGE_Error_Rate":           _bounded(0.04, 0.18, n_brd),
+        "SAGE_Payload_Variance":     _bounded(20, 300, n_brd),
+    }
+    df_r = pd.concat([pd.DataFrame(core_r), pd.DataFrame(brd_r)], ignore_index=True)
+    df_r["SAGE_Request_Velocity"] = _bounded(3, 24, n)
+    df_r["SAGE_Peak_Burst_RPS"] = _bounded(1, 10, n)
+    df_r["SAGE_Velocity_Trend"] = _bounded(2, 14, n)
+    df_r["SAGE_Endpoint_Concentration"] = _bounded(0.06, 0.32, n)
+    df_r["SAGE_Cart_Ratio"] = rng.exponential(0.003, n).clip(0, 0.02)
+    df_r["SAGE_Sequential_Traversal"] = rng.exponential(0.07, n).clip(0, 0.25)
+    df_r["SAGE_Sensitive_Endpoint_Ratio"] = _bounded(0.32, 0.85, n)
+    df_r["SAGE_UA_Entropy"] = _bounded(0.0, 0.9, n)
+    df_r["SAGE_Header_Completeness"] = _bounded(0.38, 0.72, n)
+    df_r["SAGE_Response_Size_Variance"] = _bounded(50, 850, n)
+    df_r["true_label"] = "recon"
+    frames.append(df_r)
 
     return (
         pd.concat(frames, ignore_index=True)
