@@ -5,8 +5,8 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: sage-redis
-    ports:
-      - "6379:6379"
+    # ports:
+    #  - "6379:6379"
     command: >
       redis-server
       --maxmemory 512mb
@@ -107,7 +107,7 @@ services:
       context: ../sage-gateway
     container_name: sage-gateway
     ports:
-      - "8080:8080"        # protected path
+      - "8081:8081"        # protected path
     environment:
       - UPSTREAM_URL=http://sage-ecommerce:3001
       - REDIS_HOST=sage-redis

@@ -62,9 +62,16 @@ class HumanBrowser(HttpUser):
     fixed_count = 8
     wait_time = between(3, 8)
 
+    def on_start(self):
+        self.ip = ip_residential()
+        headers = self._headers()
+        self.client.get("/static/style.css", headers=headers, name="Human - static css")
+        self.client.get("/static/app.js", headers=headers, name="Human - static js")
+        self.client.get("/static/logo.png", headers=headers, name="Human - static logo")
+
     def _headers(self):
         return {
-            "X-Forwarded-For": ip_residential(),
+            "X-Forwarded-For": self.ip,
             "User-Agent": random.choice(SCRAPER_UA_POOL),
             "Content-Type": "application/json",
         }
@@ -72,11 +79,7 @@ class HumanBrowser(HttpUser):
     def _random_product_id(self):
         return random.randint(1, 50)
 
-    def on_start(self):
-        headers = self._headers()
-        self.client.get("/static/style.css", headers=headers, name="Human - static css")
-        self.client.get("/static/app.js", headers=headers, name="Human - static js")
-        self.client.get("/static/logo.png", headers=headers, name="Human - static logo")
+    
 
     @task(4)
     def browse_pages(self):
@@ -102,11 +105,12 @@ class AkamaiScraper(HttpUser):
     wait_time = between(0.5, 1.5)
 
     def on_start(self):
+        self.ip = ip_datacenter()
         self._id_cycle = cycle(range(1, 51))
 
     def _headers(self):
         return {
-            "X-Forwarded-For": ip_datacenter(),
+            "X-Forwarded-For": self.ip,
             "User-Agent": random.choice(SCRAPER_UA_POOL),
             "Content-Type": "application/json",
         }
@@ -130,9 +134,12 @@ class CloudflareFlood(HttpUser):
     fixed_count = 8
     wait_time = between(0, 0.1)
 
+    def on_start(self):
+        self.ip = ip_distributed()
+
     def _headers(self):
         return {
-            "X-Forwarded-For": ip_distributed(),
+            "X-Forwarded-For": self.ip,
             "User-Agent": "curl/8.6.0",
             "Content-Type": "application/json",
         }
@@ -161,9 +168,12 @@ class UnprotectedFlood(HttpUser):
     # Use absolute URLs so this class still targets 3001 even when global --host points to 8081.
     target_base = "http://localhost:3001"
 
+    def on_start(self):
+        self.ip = ip_distributed()
+
     def _headers(self):
         return {
-            "X-Forwarded-For": ip_distributed(),
+            "X-Forwarded-For": self.ip,
             "User-Agent": "curl/8.6.0",
             "Content-Type": "application/json",
         }
@@ -197,9 +207,12 @@ class ReconBot(HttpUser):
     fixed_count = 4
     wait_time = between(2, 5)
 
+    def on_start(self):
+        self.ip = ip_tor_like()
+
     def _headers(self):
         return {
-            "X-Forwarded-For": ip_tor_like(),
+            "X-Forwarded-For": self.ip,
             "User-Agent": "python-requests/2.31.0",
             "Content-Type": "application/json",
         }

@@ -73,7 +73,7 @@ public class GatewayController {
                 return filterResult.get();
             }
 
-            String backendPath = path.replaceFirst("^/api", "");
+            String backendPath = path;
             String target = matchedRoute.backendUrl() + backendPath;
 
             ResponseEntity<String> response = proxyService.forwardRequest(
@@ -92,9 +92,8 @@ public class GatewayController {
             return ResponseEntity.internalServerError().body("Gateway Error: " + e.getMessage());
 
         } finally {
-            // Temporarily disabled during testing.
-            // long duration = System.currentTimeMillis() - startTime;
-            // trafficLogger.logTraffic(tenantId, userId, path, duration, statusCode);
+            long duration = System.currentTimeMillis() - startTime;
+            trafficLogger.logTraffic(tenantId, userId, path, duration, statusCode);
         }
     }
 
